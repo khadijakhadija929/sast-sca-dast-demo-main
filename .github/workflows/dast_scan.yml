@@ -25,7 +25,18 @@ jobs:
 
       # Wait for the app to start (sleep is simple, a healthcheck loop is better)
       - name: Wait for app to start
-        run: sleep 10 # Adjust if needed
+        run: |
+          echo "Attente de Flask..."
+          for i in $(seq 1 30); do
+            if docker run --rm --network zap-network curlimages/curl -s -o /dev/null -w "%{http_code}" http://flask-app-container:5000 | grep -q 200; then
+              echo "Flask est prêt !"
+              exit 0
+            fi
+            echo "Tentative $i/30..."
+            sleep 2
+          done
+          echo "Timeout : Flask n'est pas prêt"
+          exit 1 # Adjust if needed
 
       # Create a directory for ZAP reports on the runner
       - name: Create ZAP reports directory
