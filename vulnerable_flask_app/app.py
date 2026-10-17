@@ -1,9 +1,22 @@
+import os
 from flask import Flask, request
-import subprocess
+from markupsafe import escape
 
 app = Flask(__name__)
-import os
+# 1. Secret lu dans l'environnement (plus de secret en dur)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-temporaire')
+
+# 3. Liste blanche de commandes autorisées
+ALLOWED = {"date": ["date"], "uptime": ["uptime"]}
+
+# 7. En-têtes de sécurité (Anti-Clickjacking, CSP, etc.)
+@app.after_request
+def security_headers(resp):
+    resp.headers["Content-Security-Policy"] = "default-src 'self'"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
 @app.route('/')
 def index():
     return """
@@ -11,47 +24,34 @@ def index():
     <p>Explore the different pages:</p>
     <ul>
         <li><a href="/hello?name=World">Hello Page (try changing the name in the URL!)</a></li>
-        <li><a href="/execute?cmd=ls -la">Execute Command Page (try changing the command in the URL!)</a></li>
-        <li><a href="/admin">Admin Area (contains a secret!)</a></li>
+        <li><a href="/execute?cmd=date">Execute Command Page (try changing the command in the URL!)</a></li>
     </ul>
-    
-    <a href="https://github.com/pandelig/sast-sca-dast-demo" target="_blank">GitHub Repo↗</a></li>
     """
 
 @app.route('/hello')
 def hello():
     name = request.args.get('name', 'Guest')
-    return f"""
-    <h1>Hello Page</h1>
-    <p>Hello, {name}!</p>
-    <p><a href="/">Back to Homepage</a></p>
-    """
+    # 2. Échappement HTML (anti-XSS)
+    return f"<h1>Hello Page</h1><p>Hello, {escape(name)}!</p>"
 
 @app.route('/execute')
 def execute():
-    command = request.args.get('cmd', 'ls')
-    # CORRECTION : On limite aux commandes autorisées et on désactive shell=True
-    allowed_commands = ['ls', 'whoami', 'pwd']
-    cmd_name = command.split()[0]
+    import subprocess
+    key = request.args.get('cmd', 'date')
     
-    if cmd_name not in allowed_commands:
-        return "Commande non autorisée", 403
+    # Vérification de la liste blanche
+    if key not in ALLOWED:
+        return "Commande non autorisée", 400
         
-    result = subprocess.run(command.split(), shell=False, capture_output=True, text=True)
-    return f"""
-    <h1>Execute Command Page</h1>
-    <p>Executing command: <code>{command}</code></p>
-    <pre>{result.stdout}</pre>
-    <pre style="color: red;">{result.stderr}</pre>
-    <p><a href="/">Back to Homepage</a></p>
-    """
-@app.route('/admin')
-def admin():
-    return f"""
-    <h1>Admin Area</h1>
-    <p>Admin area - Secret Key: {app.config['SECRET_KEY']}</p>
-    <p><a href="/">Back to Homepage</a></p>
-    """
+    # Pas de shell=True (anti-injection de commande)
+    out = subprocess.run(ALLOWED[key], capture_output=True, text=True)
+    
+    # Échappement HTML du résultat
+    return f"<h1>Execute Command Page</h1><pre>{escape(out.stdout)}</pre>"
+
+# 4. La route /admin a été supprimée (ou protégée par une authentification)
 
 if __name__ == '__main__':
-    app.run(debug=False, host='127.0.0.1')
+    # 5. Debug désactivé par défaut (sauf si FLASK_DEBUG=1)
+    debug = os.environ.get("FLASK_DEBUG") == "1"
+    app.run(debug=debug, host='0.0.0.0')
